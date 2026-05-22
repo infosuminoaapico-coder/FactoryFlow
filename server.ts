@@ -1,10 +1,24 @@
 import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
+
+// Load standard .env first
 dotenv.config({ override: true });
+
+// Try loading from .env.example (with override: false, so if variables are not in .env, they are backfilled from .env.example)
+try {
+  dotenv.config({ path: ".env.example", override: false });
+} catch (e) {
+  // ignore
+}
+try {
+  dotenv.config({ path: path.resolve(process.cwd(), ".env.example"), override: false });
+} catch (e) {
+  // ignore
+}
 
 import express from "express";
 import cors from "cors";
-import path from "path";
-import { fileURLToPath } from "url";
 import { supabase } from "./src/lib/supabase";
 import QRCode from "qrcode";
 
@@ -589,7 +603,7 @@ app.post("/api/transactions", async (req, res) => {
   }
 
   // Simplified Line Notify (optional)
-  if (process.env.LINE_CHANNEL_ACCESS_TOKEN) {
+  if (isLineConfigured()) {
       const project = project_id ? (await supabase.from("projects").select("name, customer").eq("id", project_id).single()).data : null;
       sendLineFlex({
           type,
@@ -623,7 +637,7 @@ app.post("/api/transactions/:id/approve", async (req, res) => {
     }
 
     // Notify approval
-    if (process.env.LINE_CHANNEL_ACCESS_TOKEN) {
+    if (isLineConfigured()) {
         sendLineFlex({
             type: txn.type,
             productName: txn.products?.name || "ไม่ระบุ",
@@ -656,7 +670,7 @@ app.post("/api/transactions/:id/reject", async (req, res) => {
     await supabase.from('stock_transactions').update({ status: 'REJECTED' }).eq('id', id);
 
     // Notify rejection
-    if (process.env.LINE_CHANNEL_ACCESS_TOKEN) {
+    if (isLineConfigured()) {
         sendLineFlex({
             type: txn.type,
             productName: txn.products?.name || "ไม่ระบุ",
@@ -684,7 +698,7 @@ app.post("/api/transactions/:id/reject", async (req, res) => {
 app.get("/api/line-bot-info", async (req, res) => {
   try {
     const rawToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || "";
-    const token = rawToken.trim();
+    const token = getLineToken();
     
     if (!token) return res.status(401).json({ message: "ไม่ได้กำหนด Channel Access Token ในระบบ" });
     
@@ -699,7 +713,7 @@ app.get("/api/line-bot-info", async (req, res) => {
         status: lineRes.status,
         details: errorData,
         tokenPrefix: token.substring(0, 10) + "...",
-        hasWhitespace: rawToken !== token
+        hasWhitespace: rawToken.trim() !== token
       });
     }
     
@@ -714,8 +728,7 @@ app.get("/api/line-bot-info", async (req, res) => {
 app.post("/api/test-line", async (req, res) => {
   try {
     const { groupId } = req.body;
-    const rawToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || "";
-    const token = rawToken.trim();
+    const token = getLineToken();
     
     if (!token) return res.status(401).json({ message: "No token" });
     
@@ -808,6 +821,29 @@ app.get("/api/dashboard", async (req, res) => {
   }
 });
 
+function getLineToken(): string {
+  const rawToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || "";
+  const token = rawToken.trim().replace(/^["']|["']$/g, '');
+  const isAscii = (str: string) => /^[\x00-\x7F]*$/.test(str);
+  if (!token || token.includes("YOUR_") || token.includes("ใส่_") || !isAscii(token)) {
+    return "";
+  }
+  return token;
+}
+
+function getLineGroupId(): string {
+  const rawId = process.env.LINE_GROUP_ID || "";
+  const groupId = rawId.trim().replace(/^["']|["']$/g, '');
+  if (!groupId || groupId.includes("YOUR_") || groupId.includes("ใส่_")) {
+    return "Cd597a0c0fec4e516bc97c3d3d8d71a09";
+  }
+  return groupId;
+}
+
+function isLineConfigured(): boolean {
+  return getLineToken() !== "";
+}
+
 async function sendLineFlex(data: { 
   type: string, 
   productName: string, 
@@ -824,21 +860,11 @@ async function sendLineFlex(data: {
   location?: string,
   note?: string
 }) {
-  // Robust token cleaning
-  const rawToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || "";
-  const token = rawToken.trim().replace(/^["']|["']$/g, '');
-  const groupId = (process.env.LINE_GROUP_ID || "Cd597a0c0fec4e516bc97c3d3d8d71a09").trim().replace(/^["']|["']$/g, '');
+  const token = getLineToken();
+  const groupId = getLineGroupId();
   
-  // Validate token (must be non-empty and ASCII-only to prevent ByteString error)
-  const isAscii = (str: string) => /^[\x00-\x7F]*$/.test(str);
-  
-  if (!token || token.includes("YOUR_") || token.includes("ใส่_") || !isAscii(token)) {
-    if (token) {
-        if (!isAscii(token)) console.warn("❌ [LINE] Token contains non-ASCII characters. Check Netlify Environment Variables.");
-        else console.warn("❌ [LINE] Placeholder token detected. Notifications disabled.");
-    } else {
-        console.warn("❌ [LINE] Missing LINE_CHANNEL_ACCESS_TOKEN. Notifications disabled.");
-    }
+  if (!token) {
+    console.warn("❌ [LINE] Invalid or missing LINE_CHANNEL_ACCESS_TOKEN. Notifications disabled.");
     return { success: false, error: "Invalid/Missing LINE Token" };
   }
 
@@ -850,30 +876,62 @@ async function sendLineFlex(data: {
   const isRejected = data.status === 'REJECTED';
   
   let headerColor = '#dc3545'; // Default red for ISSUE
-  let typeText = isIssue ? 'เบิกสินค้า' : (isReceive ? 'รับเข้าสินค้า' : (isReturn ? 'คืนสินค้า' : (isAdjust ? 'ปรับปรุงยอดสต็อก' : 'รายการเดินคลัง')));
+  let typeText = isIssue ? 'เบิกสินค้า' : (isReceive ? 'รับเข้าสินค้า' : (isReturn ? 'คืนสินค้า' : (isAdjust ? 'ปรับยอดสต็อก' : 'รายการเดินคลัง')));
   
   if (isApproved && !isReceive && !isAdjust) {
     headerColor = '#28a745'; // Green for approved
-    typeText += ' (อนุมัติแล้ว ✅)';
+    typeText = 'เบิกสินค้า (อนุมัติแล้ว ✅)';
   } else if (isRejected) {
     headerColor = '#dc3545'; // Red for rejected
-    typeText += ' (ปฏิเสธแล้ว ❌)';
+    typeText = 'เบิกสินค้า (ปฏิเสธแล้ว ❌)';
   } else if (isReceive) {
     headerColor = '#007bff'; // Blue for receive
+    typeText = 'รับเข้าสินค้า';
   } else if (isReturn) {
     headerColor = '#28a745'; // Green for return
+    typeText = 'คืนสินค้า';
   } else if (isAdjust) {
-    headerColor = '#f39c12'; // Orange/Amber for adjust
+    headerColor = '#6c757d'; // Gray for adjust
+    typeText = 'ปรับยอดสต็อก';
   } else if (isIssue) {
-    typeText += ' (รออนุมัติ ⏳)';
+    typeText = 'เบิกสินค้า (รออนุมัติ ⏳)';
   } else {
     headerColor = '#6c757d'; // Gray for others
   }
 
-  const now = new Date();
-  const dateStr = now.toLocaleDateString("th-TH", { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: "Asia/Bangkok" });
-  const timeStr = now.toLocaleTimeString("th-TH", { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: "Asia/Bangkok" });
-  const refId = data.refId || `REQ-${now.getTime().toString().substring(7)}`;
+  // Get robust Thai Date-Time format (Buddhist Era: 2569 etc.)
+  const getThaiDateTime = () => {
+    try {
+      const options = { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false } as const;
+      const formatter = new Intl.DateTimeFormat('en-US', options);
+      const parts = formatter.formatToParts(new Date());
+      
+      const day = parts.find(p => p.type === 'day')?.value || '22';
+      const month = parts.find(p => p.type === 'month')?.value || '05';
+      let year = parseInt(parts.find(p => p.type === 'year')?.value || '2026', 10);
+      if (year < 2500) {
+        year += 543; // Convert AD to BE
+      }
+      
+      const hour = parts.find(p => p.type === 'hour')?.value || '12';
+      const minute = parts.find(p => p.type === 'minute')?.value || '00';
+      const second = parts.find(p => p.type === 'second')?.value || '00';
+      
+      return { dateStr: `${day}/${month}/${year}`, timeStr: `${hour}:${minute}:${second}` };
+    } catch (e) {
+      return { dateStr: '14/05/2569', timeStr: '21:54:56' };
+    }
+  };
+
+  const { dateStr, timeStr } = getThaiDateTime();
+  const refId = data.refId || `REQ-${new Date().getTime().toString().substring(7)}`;
+
+  const titleText = isReceive 
+    ? `ซัพพลายเออร์: ${data.vendorName || "ไม่ระบุ"}` 
+    : `โปรเจ็ค: ${data.projectName || "ไม่ระบุ"}`;
+  const subtitleText = data.location 
+    ? `สถานที่: ${data.location}` 
+    : "รายละเอียดการสต็อก";
 
   const flexMessage = {
     type: "bubble",
@@ -884,7 +942,7 @@ async function sendLineFlex(data: {
       contents: [
         {
           type: "text",
-          text: typeText.toUpperCase(),
+          text: typeText,
           weight: "bold",
           color: "#ffffff",
           size: "xl",
@@ -917,7 +975,7 @@ async function sendLineFlex(data: {
               type: "box",
               layout: "horizontal",
               contents: [
-                { type: "text", text: "วันที่บันทึก", size: "sm", color: "#555555", flex: 2 },
+                { type: "text", text: "วันที่เบิก", size: "sm", color: "#555555", flex: 2 },
                 { type: "text", text: dateStr, size: "sm", color: "#111111", align: "end", flex: 3 }
               ]
             },
@@ -925,7 +983,7 @@ async function sendLineFlex(data: {
               type: "box",
               layout: "horizontal",
               contents: [
-                { type: "text", text: "เวลาที่บันทึก", size: "sm", color: "#555555", flex: 2 },
+                { type: "text", text: "เวลาเบิก", size: "sm", color: "#555555", flex: 2 },
                 { type: "text", text: timeStr, size: "sm", color: "#111111", align: "end", flex: 3 }
               ]
             },
@@ -933,8 +991,8 @@ async function sendLineFlex(data: {
               type: "box",
               layout: "horizontal",
               contents: [
-                { type: "text", text: isAdjust ? "ผู้ปรับยอด" : "ชื่อคนเบิก/รับ", size: "sm", color: "#555555", flex: 2 },
-                { type: "text", text: data.requesterName || data.userName, size: "sm", color: "#111111", align: "end", flex: 3, weight: "bold" }
+                { type: "text", text: "ชื่อคนเบิก", size: "sm", color: "#555555", flex: 2 },
+                { type: "text", text: data.requesterName || data.userName || "ไม่ระบุ", size: "sm", color: "#111111", align: "end", flex: 3, weight: "bold" }
               ]
             },
             {
@@ -958,7 +1016,7 @@ async function sendLineFlex(data: {
           contents: [
             {
               type: "text",
-              text: isReceive ? `ซัพพลายเออร์: ${data.vendorName || "ไม่ระบุ"}` : `โปรเจ็ค: ${data.projectName}`,
+              text: titleText,
               weight: "bold",
               size: "md",
               color: "#000000",
@@ -966,7 +1024,7 @@ async function sendLineFlex(data: {
             },
             {
               type: "text",
-              text: data.location ? `สถานที่: ${data.location}` : "รายละเอียดการสต็อก",
+              text: subtitleText,
               size: "xs",
               color: "#aaaaaa",
               margin: "xs"
@@ -985,8 +1043,8 @@ async function sendLineFlex(data: {
               type: "box",
               layout: "horizontal",
               contents: [
-                { type: "text", text: "รายละเอียดรายการ", size: "xs", color: "#888888", weight: "bold" },
-                { type: "text", text: "จำนวน", size: "xs", color: "#888888", align: "end", weight: "bold" }
+                { type: "text", text: "รายการเบิก", size: "xs", color: "#888888", weight: "bold", flex: 3 },
+                { type: "text", text: "จำนวน", size: "xs", color: "#888888", align: "end", weight: "bold", flex: 2 }
               ]
             },
             {
@@ -994,20 +1052,27 @@ async function sendLineFlex(data: {
               layout: "horizontal",
               margin: "sm",
               contents: [
-                { type: "text", text: `1. ${data.productName}`, size: "sm", color: "#111111", weight: "bold", flex: 3, wrap: true },
+                {
+                  type: "box",
+                  layout: "vertical",
+                  flex: 3,
+                  contents: [
+                    { type: "text", text: `1. ${data.productName}`, size: "sm", color: "#111111", weight: "bold", wrap: true },
+                    {
+                      type: "text",
+                      text: data.unitPrice ? `@ ${data.unitPrice.toLocaleString()} บาท/${data.unit}` : "@ ระบบจัดการพัสดุ WoodCraft",
+                      size: "xxs",
+                      color: "#bbbbbb",
+                      margin: "xs"
+                    }
+                  ]
+                },
                 { 
                   type: "text", 
                   text: (isAdjust && parseFloat(data.qty as string) > 0) ? `+${data.qty} ${data.unit}` : `${data.qty} ${data.unit}`, 
                   size: "sm", color: "#111111", align: "end", weight: "bold", flex: 2 
                 }
               ]
-            },
-            {
-              type: "text",
-              text: data.unitPrice ? `@ ${data.unitPrice.toLocaleString()} บาท/${data.unit}` : "@ ระบบจัดการพัสดุ WoodCraft",
-              size: "xxs",
-              color: "#bbbbbb",
-              margin: "xs"
             }
           ]
         },
@@ -1016,7 +1081,7 @@ async function sendLineFlex(data: {
           layout: "horizontal",
           margin: "lg",
           contents: [
-            { type: "text", text: "รวมจำนวนเงินทั้งสิ้น", size: "md", color: headerColor, weight: "bold", flex: 3 },
+            { type: "text", text: "รวมเบิก จำนวนเงิน", size: "md", color: headerColor, weight: "bold", flex: 4 },
             { 
               type: "text", 
               text: data.totalPrice ? `${Math.abs(data.totalPrice).toLocaleString()} บาท` : "ตรวจสอบในระบบ", 
@@ -1089,11 +1154,10 @@ async function sendLineFlex(data: {
 }
 
 async function sendLineSimple(text: string) {
-  const token = (process.env.LINE_CHANNEL_ACCESS_TOKEN || "").trim().replace(/^["']|["']$/g, '');
-  const groupId = (process.env.LINE_GROUP_ID || "Cd597a0c0fec4e516bc97c3d3d8d71a09").trim().replace(/^["']|["']$/g, '');
+  const token = getLineToken();
+  const groupId = getLineGroupId();
   
-  const isAscii = (str: string) => /^[\x00-\x7F]*$/.test(str);
-  if (!token || !text || !isAscii(token) || token.includes("ใส่_") || token.includes("YOUR_")) return;
+  if (!token || !text) return;
   try { 
       const response = await fetch("https://api.line.me/v2/bot/message/push", { 
           method: "POST", 
