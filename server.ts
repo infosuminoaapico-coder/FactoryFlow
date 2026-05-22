@@ -74,7 +74,7 @@ app.post("/api/login", async (req, res) => {
     const { username, password } = req.body;
 
     // 1. Hardcoded Admin
-    if (username === 'admin' && password === 'admin123') {
+    if (username === 'admin' && password === '123456') {
       return res.json({ 
         id: 1, 
         name: 'ผู้ดูแลระบบ (Admin)', 
@@ -1140,7 +1140,7 @@ async function start() {
   }
 }
 
-if (process.env.NODE_ENV !== "test") {
+if (process.env.NODE_ENV !== "test" && !process.env.NETLIFY && !process.env.LAMBDA_TASK_ROOT) {
   start();
 }
 

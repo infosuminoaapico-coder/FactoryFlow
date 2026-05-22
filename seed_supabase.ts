@@ -6,9 +6,9 @@ async function seed() {
   // 1. Seed Users
   console.log('Seeding Users...');
   const { data: users, error: userError } = await supabase.from('users').upsert([
-    { username: 'admin', password: 'password123', name: 'ผู้ดูแลระบบ', role: 'admin' },
-    { username: 'staff1', password: 'password123', name: 'นายช่าง สมชาย', role: 'staff' },
-    { username: 'staff2', password: 'password123', name: 'นายดาวเหนือ', role: 'staff' }
+    { username: 'admin', password: '123456', name: 'ผู้ดูแลระบบ', role: 'admin' },
+    { username: 'staff1', password: '123456', name: 'นายช่าง สมชาย', role: 'staff' },
+    { username: 'staff2', password: '123456', name: 'นายดาวเหนือ', role: 'staff' }
   ], { onConflict: 'username' }).select();
 
   if (userError) {
