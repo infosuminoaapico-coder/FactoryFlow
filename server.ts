@@ -822,7 +822,7 @@ app.get("/api/dashboard", async (req, res) => {
 });
 
 function getLineToken(): string {
-  const rawToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || "";
+  const rawToken = process.env.LINE_CHANNEL_ACCESS_TOKEN || "Wjq44u5QsWfb+ehQ77H44FJVnVjk3shzyqEd4XOxsgBGexy7q39PZ1pKt2pKYisx0mJnbNYMwmn9EOXFnn5F/MXJ4EYw48ForAy4rQxUZluXzv9gecDbrv9LXUrlZeKKjhDHhjOZFSEC4GDm6BN2tQdB04t89/1O/w1cDnyilFU=";
   const token = rawToken.trim().replace(/^["']|["']$/g, '');
   const isAscii = (str: string) => /^[\x00-\x7F]*$/.test(str);
   if (!token || token.includes("YOUR_") || token.includes("ใส่_") || !isAscii(token)) {
