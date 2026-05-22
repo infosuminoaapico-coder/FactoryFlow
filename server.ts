@@ -15,6 +15,17 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Normalization middleware for Netlify path rewrites (/.netlify/functions/api -> /api)
+app.use((req, res, next) => {
+  if (req.url && req.url.startsWith('/.netlify/functions/api')) {
+    req.url = req.url.replace('/.netlify/functions/api', '/api');
+  }
+  if (req.originalUrl && req.originalUrl.startsWith('/.netlify/functions/api')) {
+    req.originalUrl = req.originalUrl.replace('/.netlify/functions/api', '/api');
+  }
+  next();
+});
+
 // Supabase Connection Log (Server-side)
 const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://glkuxiseyxvwtduydxkp.supabase.co';
 console.log(`[Supabase] Initializing connection to: ${supabaseUrl.substring(0, 20)}...`);
@@ -1140,7 +1151,13 @@ async function start() {
   }
 }
 
-if (process.env.NODE_ENV !== "test" && !process.env.NETLIFY && !process.env.LAMBDA_TASK_ROOT) {
+const isServerless = 
+  process.env.NETLIFY === "true" || 
+  process.env.NETLIFY === "1" ||
+  !!process.env.LAMBDA_TASK_ROOT || 
+  !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+
+if (process.env.NODE_ENV !== "test" && !isServerless) {
   start();
 }
 
