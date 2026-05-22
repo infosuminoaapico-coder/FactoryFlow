@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Remix: FactoryFlow Pro",
+  "description": "ระบบจัดการเบิกจ่ายสต๊อก ควบคุมต้นทุนโปรเจค และแจ้งเตือน LINE สำหรับโรงงานเฟอร์นิเจอร์",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": []
+}
