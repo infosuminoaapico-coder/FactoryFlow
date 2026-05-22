@@ -5,11 +5,11 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
-import { supabase } from "./src/lib/supabase.ts";
+import { supabase } from "./src/lib/supabase";
 import QRCode from "qrcode";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __filename = typeof import.meta !== "undefined" && import.meta?.url ? fileURLToPath(import.meta.url) : "";
+const __dirname = __filename ? path.dirname(__filename) : process.cwd();
 
 const app = express();
 app.use(cors());
